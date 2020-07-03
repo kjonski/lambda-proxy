@@ -1,11 +1,12 @@
 """Test lambda-proxy."""
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Callable, Optional
 
 import os
 import json
 import zlib
 import base64
+import types
 
 import pytest
 from mock import Mock
@@ -179,6 +180,7 @@ def test_proxy_API():
     app._add_route("/test/<string:user>/<name>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test/remote/pixel",
         "httpMethod": "GET",
         "headers": {},
@@ -206,6 +208,7 @@ def test_proxy_intStatus_API():
     app._add_route("/test", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test",
         "httpMethod": "GET",
         "headers": {},
@@ -232,6 +235,7 @@ def test_proxy_APIpath():
     app._add_route("/test/<string:user>/<name>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "resource": "/",
         "path": "/test/remote/pixel",
         "httpMethod": "GET",
@@ -260,6 +264,7 @@ def test_proxy_APIpathProxy():
     app._add_route("/test/<string:user>/<name>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "resource": "{something+}",
         "pathParameters": {"something": "test/remote/pixel"},
         "path": "/test/remote/pixel",
@@ -289,6 +294,7 @@ def test_proxy_APIpathCustomDomain():
     app._add_route("/test/<string:user>/<name>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "resource": "/{something+}",
         "pathParameters": {"something": "test/remote/pixel"},
         "path": "/myapi/test/remote/pixel",
@@ -325,6 +331,7 @@ def test_ttl():
         app._add_route("/yo", funct_error, methods=["GET"], cors=True, ttl=3600)
 
     event = {
+        "version": "1.0",
         "path": "/test/remote/pixel",
         "httpMethod": "GET",
         "headers": {},
@@ -346,6 +353,7 @@ def test_ttl():
     funct.assert_called_with(user="remote", name="pixel")
 
     event = {
+        "version": "1.0",
         "path": "/yo",
         "httpMethod": "GET",
         "headers": {},
@@ -376,6 +384,7 @@ def test_cache_control():
     )
 
     event = {
+        "version": "1.0",
         "path": "/test/remote/pixel",
         "httpMethod": "GET",
         "headers": {},
@@ -397,6 +406,7 @@ def test_cache_control():
     funct.assert_called_with(user="remote", name="pixel")
 
     event = {
+        "version": "1.0",
         "path": "/yo",
         "httpMethod": "GET",
         "headers": {},
@@ -413,6 +423,7 @@ def test_querystringNull():
     app._add_route("/test/<user>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel",
         "httpMethod": "GET",
         "headers": {},
@@ -440,6 +451,7 @@ def test_headersNull():
     app._add_route("/test/<user>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel",
         "httpMethod": "GET",
         "headers": None,
@@ -471,6 +483,7 @@ def test_API_encoding():
     app._add_route("/test/<user>.jpg", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {},
@@ -497,6 +510,7 @@ def test_API_encoding():
         binary_b64encode=True,
     )
     event = {
+        "version": "1.0",
         "path": "/test_encode/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {},
@@ -536,6 +550,7 @@ def test_API_compression():
 
     # Should compress because "Accept-Encoding" is in header
     event = {
+        "version": "1.0",
         "path": "/test_compress/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {"Accept-Encoding": "gzip, deflate"},
@@ -557,6 +572,7 @@ def test_API_compression():
 
     # Should not compress because "Accept-Encoding" is missing in header
     event = {
+        "version": "1.0",
         "path": "/test_compress/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {},
@@ -585,6 +601,7 @@ def test_API_compression():
         binary_b64encode=True,
     )
     event = {
+        "version": "1.0",
         "path": "/test_compress_b64/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {"Accept-Encoding": "gzip, deflate"},
@@ -619,6 +636,7 @@ def test_API_compression():
         binary_b64encode=True,
     )
     event = {
+        "version": "1.0",
         "path": "/test_compress_b64/remotepixel.json",
         "httpMethod": "GET",
         "headers": {"Accept-Encoding": "gzip, deflate"},
@@ -645,6 +663,7 @@ def test_API_compression():
     assert res == resp
 
     event = {
+        "version": "1.0",
         "path": "/test_compress_b64/remotepixel.json",
         "httpMethod": "GET",
         "headers": {},
@@ -693,6 +712,7 @@ def test_API_otherCompression():
 
     # Zlib
     event = {
+        "version": "1.0",
         "path": "/test_zlib/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {"Accept-Encoding": "zlib, gzip, deflate"},
@@ -714,6 +734,7 @@ def test_API_otherCompression():
 
     # Deflate
     event = {
+        "version": "1.0",
         "path": "/test_deflate/remotepixel.jpg",
         "httpMethod": "GET",
         "headers": {"Accept-Encoding": "zlib, gzip, deflate"},
@@ -734,216 +755,483 @@ def test_API_otherCompression():
     assert res == resp
 
 
-def test_API_routeURL():
+API_routeURL_test_data = [
+    (
+        {
+            "version": "1.0",
+            "route": "/users/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": '{"errorMessage": "Missing or invalid path"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /users/remotepixel",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": '{"errorMessage": "Missing or invalid path"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/users/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: GET - /users/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /users/remotepixel",
+            "rawPath": "/users/remotepixel",
+            "headers": {},
+            "queryStringParameters": {},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: GET - /users/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel",
+            "httpMethod": "POST",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: POST - /test/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /users/remotepixel",
+            "rawPath": "/test/remotepixel",
+            "headers": {},
+            "queryStringParameters": {},
+            "requestContext": {"http": {"method": "POST"}},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: POST - /test/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/users/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: GET - /users/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /users/remotepixel",
+            "rawPath": "/users/remotepixel",
+            "headers": {},
+            "queryStringParameters": {},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: GET - /users/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/users/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: GET - /test/users/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /test/users/remotepixel",
+            "rawPath": "/test/users/remotepixel",
+            "headers": {},
+            "queryStringParameters": {},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": '{"errorMessage": "No view function for: GET - /test/users/remotepixel"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 400,
+        },
+        None,
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel/6b0d1f74-8f81-11e8-83fd-6a0003389b00/1/-1.0.jpeg",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {},
+        },
+        {
+            "body": "heyyyy",
+            "headers": {
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/plain",
+            },
+            "statusCode": 200,
+        },
+        Mock(__name__="Mock", return_value=("OK", "text/plain", "heyyyy")),
+        {
+            "path": "/test/<string:v>/<uuid:uuid>/<int:z>/<float:x>.<ext>",
+            "methods": ["GET"],
+            "cors": True,
+        },
+        {
+            "v": "remotepixel",
+            "uuid": "6b0d1f74-8f81-11e8-83fd-6a0003389b00",
+            "z": 1,
+            "x": -1.0,
+            "ext": "jpeg",
+        },
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "/test/remotepixel/6b0d1f74-8f81-11e8-83fd-6a0003389b00/1/-1.0.jpeg",
+            "rawPath": "/test/remotepixel/6b0d1f74-8f81-11e8-83fd-6a0003389b00/1/-1.0.jpeg",
+            "headers": {},
+            "queryStringParameters": {},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": "heyyyy",
+            "headers": {
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/plain",
+            },
+            "statusCode": 200,
+        },
+        Mock(__name__="Mock", return_value=("OK", "text/plain", "heyyyy")),
+        {
+            "path": "/test/<string:v>/<uuid:uuid>/<int:z>/<float:x>.<ext>",
+            "methods": ["GET"],
+            "cors": True,
+        },
+        {
+            "v": "remotepixel",
+            "uuid": "6b0d1f74-8f81-11e8-83fd-6a0003389b00",
+            "z": 1,
+            "x": -1.0,
+            "ext": "jpeg",
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "event,expected_response,fn,route,assert_params", API_routeURL_test_data
+)
+def test_API_routeURL(event, expected_response, fn, route, assert_params):
     """Should catch invalid route and parse valid args."""
     app = proxy.API(name="test")
-    funct = Mock(__name__="Mock", return_value=("OK", "text/plain", "heyyyy"))
+    funct = fn or Mock(__name__="Mock", return_value=("OK", "text/plain", "heyyyy"))
     app._add_route("/test/<user>", funct, methods=["GET"], cors=True)
-
-    event = {
-        "route": "/users/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {},
-    }
-    resp = {
-        "body": '{"errorMessage": "Missing or invalid path"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 400,
-    }
+    if route is not None:
+        if "endpoint" not in route:
+            route["endpoint"] = funct
+        app._add_route(**route)
     res = app(event, {})
-    assert res == resp
+    assert res == expected_response
 
-    event = {
-        "path": "/users/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {},
-    }
-    resp = {
-        "body": '{"errorMessage": "No view function for: GET - /users/remotepixel"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 400,
-    }
-    res = app(event, {})
-    assert res == resp
+    if assert_params is not None:
+        funct.assert_called_with(**assert_params)
 
-    event = {
-        "path": "/test/remotepixel",
-        "httpMethod": "POST",
-        "headers": {},
-        "queryStringParameters": {},
-    }
-    resp = {
-        "body": '{"errorMessage": "No view function for: POST - /test/remotepixel"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 400,
-    }
-    res = app(event, {})
-    assert res == resp
+    clear_logger_handlers(app)
 
-    event = {
-        "path": "/users/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {},
-    }
-    resp = {
-        "body": '{"errorMessage": "No view function for: GET - /users/remotepixel"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 400,
-    }
-    res = app(event, {})
-    assert res == resp
 
-    event = {
-        "path": "/test/users/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {},
-    }
-    resp = {
-        "body": '{"errorMessage": "No view function for: GET - /test/users/remotepixel"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 400,
-    }
-    res = app(event, {})
-    assert res == resp
-
-    funct = Mock(__name__="Mock", return_value=("OK", "text/plain", "heyyyy"))
-    app._add_route(
-        "/test/<string:v>/<uuid:uuid>/<int:z>/<float:x>.<ext>",
-        funct,
-        methods=["GET"],
-        cors=True,
-    )
-
-    event = {
-        "path": "/test/remotepixel/6b0d1f74-8f81-11e8-83fd-6a0003389b00/1/-1.0.jpeg",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {},
-    }
-    resp = {
-        "body": "heyyyy",
-        "headers": {
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET",
-            "Access-Control-Allow-Origin": "*",
-            "Content-Type": "text/plain",
+API_routeToken_test_data = [
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {"access_token": "yo"},
         },
-        "statusCode": 200,
-    }
-    res = app(event, {})
-    assert res == resp
-    funct.assert_called_with(
-        v="remotepixel",
-        uuid="6b0d1f74-8f81-11e8-83fd-6a0003389b00",
-        z=1,
-        x=-1.0,
-        ext="jpeg",
-    )
+        {
+            "body": "heyyyy",
+            "headers": {
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/plain",
+            },
+            "statusCode": 200,
+        },
+        {"user": "remotepixel"},
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /test/remotepixel",
+            "rawPath": "/test/remotepixel",
+            "headers": {},
+            "queryStringParameters": {"access_token": "yo"},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": "heyyyy",
+            "headers": {
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/plain",
+            },
+            "statusCode": 200,
+        },
+        {"user": "remotepixel"},
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {"inp": 1, "access_token": "yo"},
+        },
+        {
+            "body": "heyyyy",
+            "headers": {
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/plain",
+            },
+            "statusCode": 200,
+        },
+        {"user": "remotepixel", "inp": 1},
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /test/remotepixel",
+            "rawPath": "/test/remotepixel",
+            "headers": {},
+            "queryStringParameters": {"inp": 1, "access_token": "yo"},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": "heyyyy",
+            "headers": {
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/plain",
+            },
+            "statusCode": 200,
+        },
+        {"user": "remotepixel", "inp": 1},
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {"access_token": "yep"},
+        },
+        {
+            "body": '{"message": "Invalid access token"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 500,
+        },
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /test/remotepixel",
+            "rawPath": "/test/remotepixel",
+            "headers": {},
+            "queryStringParameters": {"access_token": "yep"},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": '{"message": "Invalid access token"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 500,
+        },
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {"token": "yo"},
+        },
+        {
+            "body": '{"message": "Invalid access token"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 500,
+        },
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /test/remotepixel",
+            "rawPath": "/test/remotepixel",
+            "headers": {},
+            "queryStringParameters": {"token": "yo"},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": '{"message": "Invalid access token"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 500,
+        },
+        None,
+        None,
+    ),
+    (
+        {
+            "version": "1.0",
+            "path": "/test/remotepixel",
+            "httpMethod": "GET",
+            "headers": {},
+            "queryStringParameters": {"access_token": "yo"},
+        },
+        {
+            "body": '{"message": "Invalid access token"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 500,
+        },
+        None,
+        lambda monkeypatch: monkeypatch.delenv("TOKEN", raising=False),
+    ),
+    (
+        {
+            "version": "2.0",
+            "routeKey": "GET /test/remotepixel",
+            "rawPath": "/test/remotepixel",
+            "headers": {},
+            "queryStringParameters": {"access_token": "yo"},
+            "requestContext": {"http": {"method": "GET"}},
+        },
+        {
+            "body": '{"message": "Invalid access token"}',
+            "headers": {"Content-Type": "application/json"},
+            "statusCode": 500,
+        },
+        None,
+        lambda monkeypatch: monkeypatch.delenv("TOKEN", raising=False),
+    ),
+]
 
-    # Clear logger handlers
-    for h in app.log.handlers:
-        app.log.removeHandler(h)
 
-
-def test_API_routeToken(monkeypatch):
+@pytest.mark.parametrize(
+    "event, expected_response, assert_params, before_fn", API_routeToken_test_data
+)
+def test_API_routeToken(
+    event: Dict,
+    expected_response: Dict,
+    assert_params: Optional[Dict],
+    before_fn: Optional[Callable],
+    monkeypatch,
+):
     """Validate tokens."""
     monkeypatch.setenv("TOKEN", "yo")
+    if isinstance(before_fn, types.FunctionType):
+        before_fn(monkeypatch)
 
     app = proxy.API(name="test")
     funct = Mock(__name__="Mock", return_value=("OK", "text/plain", "heyyyy"))
     app._add_route("/test/<user>", funct, methods=["GET"], cors=True, token=True)
 
-    event = {
-        "path": "/test/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {"access_token": "yo"},
-    }
-    resp = {
-        "body": "heyyyy",
-        "headers": {
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET",
-            "Access-Control-Allow-Origin": "*",
-            "Content-Type": "text/plain",
-        },
-        "statusCode": 200,
-    }
     res = app(event, {})
-    assert res == resp
-    funct.assert_called_with(user="remotepixel")
+    assert res == expected_response
+    if assert_params is not None:
+        funct.assert_called_with(**assert_params)
 
-    event = {
-        "path": "/test/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {"inp": 1, "access_token": "yo"},
-    }
-    resp = {
-        "body": "heyyyy",
-        "headers": {
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET",
-            "Access-Control-Allow-Origin": "*",
-            "Content-Type": "text/plain",
-        },
-        "statusCode": 200,
-    }
-    res = app(event, {})
-    assert res == resp
-    funct.assert_called_with(user="remotepixel", inp=1)
-
-    event = {
-        "path": "/test/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {"access_token": "yep"},
-    }
-    resp = {
-        "body": '{"message": "Invalid access token"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 500,
-    }
-    res = app(event, {})
-    assert res == resp
-
-    event = {
-        "path": "/test/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {"token": "yo"},
-    }
-    resp = {
-        "body": '{"message": "Invalid access token"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 500,
-    }
-    res = app(event, {})
-    assert res == resp
-
-    monkeypatch.delenv("TOKEN", raising=False)
-
-    event = {
-        "path": "/test/remotepixel",
-        "httpMethod": "GET",
-        "headers": {},
-        "queryStringParameters": {"access_token": "yo"},
-    }
-    resp = {
-        "body": '{"message": "Invalid access token"}',
-        "headers": {"Content-Type": "application/json"},
-        "statusCode": 500,
-    }
-    res = app(event, {})
-    assert res == resp
-
-    # Clear logger handlers
-    for h in app.log.handlers:
-        app.log.removeHandler(h)
+    clear_logger_handlers(app)
 
 
 def test_API_functionError():
@@ -953,6 +1241,7 @@ def test_API_functionError():
     app._add_route("/test/<user>", funct, methods=["GET"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel",
         "httpMethod": "GET",
         "headers": {},
@@ -983,6 +1272,7 @@ def test_API_Post():
     app._add_route("/test/<user>", funct, methods=["GET", "POST"], cors=True)
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel",
         "httpMethod": "POST",
         "headers": {},
@@ -1004,6 +1294,7 @@ def test_API_Post():
     funct.assert_called_with(user="remotepixel", body=b"0001")
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel",
         "httpMethod": "POST",
         "headers": {},
@@ -1026,6 +1317,7 @@ def test_API_Post():
     funct.assert_called_with(user="remotepixel", body='{"yo": "yo"}')
 
     event = {
+        "version": "1.0",
         "path": "/test/remotepixel",
         "httpMethod": "GET",
         "headers": {},
@@ -1065,6 +1357,7 @@ def test_API_ctx():
         )
 
     event = {
+        "version": "1.0",
         "path": "/remotepixel",
         "httpMethod": "GET",
         "headers": {},
@@ -1083,7 +1376,7 @@ def test_API_ctx():
     assert res["statusCode"] == 200
     assert body["id"] == "remotepixel"
     assert body["params"] == "1"
-    assert body["evt"] == event
+    assert body["evt"].to_dict() == event
     assert body["ctx"] == {"ctx": "jqtrde"}
 
     # Clear logger handlers
@@ -1105,6 +1398,7 @@ def test_API_multipleRoute():
         )
 
     event = {
+        "version": "1.0",
         "path": "/remotepixel",
         "httpMethod": "GET",
         "headers": {},
@@ -1126,6 +1420,7 @@ def test_API_multipleRoute():
     assert not body.get("params")
 
     event = {
+        "version": "1.0",
         "path": "/remotepixel@1",
         "httpMethod": "GET",
         "headers": {},
@@ -1189,6 +1484,7 @@ def test_API_doc():
         return ("OK", "text/plain", "yo")
 
     event = {
+        "version": "1.0",
         "path": "/openapi.json",
         "httpMethod": "GET",
         "headers": {},
@@ -1208,6 +1504,7 @@ def test_API_doc():
     assert openapi_content == body
 
     event = {
+        "version": "1.0",
         "path": "/docs",
         "httpMethod": "GET",
         "headers": {},
@@ -1225,6 +1522,7 @@ def test_API_doc():
     assert res["headers"] == headers
 
     event = {
+        "version": "1.0",
         "path": "/redoc",
         "httpMethod": "GET",
         "headers": {},
@@ -1290,6 +1588,7 @@ def test_API_doc_apigw():
         return ("OK", "text/plain", "yo")
 
     event = {
+        "version": "1.0",
         "path": "/openapi.json",
         "httpMethod": "GET",
         "headers": {"Host": "afakeapi.execute-api.us-east-1.amazonaws.com"},
@@ -1310,6 +1609,7 @@ def test_API_doc_apigw():
     assert openapi_apigw_content == body
 
     event = {
+        "version": "1.0",
         "path": "/docs",
         "httpMethod": "GET",
         "headers": {"Host": "afakeapi.execute-api.us-east-1.amazonaws.com"},
@@ -1376,6 +1676,7 @@ def test_API_docCustomDomain():
         return ("OK", "text/plain", "yo")
 
     event = {
+        "version": "1.0",
         "resource": "/{proxy+}",
         "pathParameters": {"proxy": "openapi.json"},
         "path": "/api/openapi.json",
@@ -1416,6 +1717,7 @@ def test_routeRegex():
         "/test/<regex([0-9]{4}):number>/<name>", funct_one, methods=["GET"], cors=True
     )
     event = {
+        "version": "1.0",
         "path": "/test/1234/pixel",
         "httpMethod": "GET",
         "headers": {},
@@ -1436,6 +1738,7 @@ def test_routeRegex():
     funct_one.assert_called_with(number="1234", name="pixel")
 
     event = {
+        "version": "1.0",
         "path": "/test/1234/pix",
         "httpMethod": "GET",
         "headers": {},
@@ -1468,6 +1771,7 @@ def test_routeRegexFailing():
         r"/test/<regex(user(\d+)?):user>/<sport>", funct, methods=["GET"], cors=True
     )
     event = {
+        "version": "1.0",
         "path": "/test/user1234/rugby",
         "httpMethod": "GET",
         "headers": {},
@@ -1485,7 +1789,8 @@ def test_routeRegexFailing():
 def testApigwPath():
     """test api call parsing."""
     # resource "/", no apigwg, noproxy, no path mapping
-    event = {"path": "/test/1234/pix", "headers": {}}
+    event_payload = {"version": "1.0", "path": "/test/1234/pix", "headers": {}}
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert not p.apigw_stage
@@ -1493,7 +1798,13 @@ def testApigwPath():
     assert not p.path_mapping
     assert p.prefix == ""
 
-    event = {"resource": "/", "path": "/test/1234/pix", "headers": {}}
+    event_payload = {
+        "version": "1.0",
+        "resource": "/",
+        "path": "/test/1234/pix",
+        "headers": {},
+    }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert not p.apigw_stage
@@ -1502,12 +1813,14 @@ def testApigwPath():
     assert p.prefix == ""
 
     # resource "proxy+", no apigwg, no path mapping, no api prefix
-    event = {
+    event_payload = {
+        "version": "1.0",
         "resource": "/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/test/1234/pix",
         "headers": {},
     }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert not p.apigw_stage
@@ -1516,12 +1829,14 @@ def testApigwPath():
     assert p.prefix == ""
 
     # resource "proxy+", no apigwg, no path mapping, api prefix (api)
-    event = {
+    event_payload = {
+        "version": "1.0",
         "resource": "/api/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/api/test/1234/pix",
         "headers": {},
     }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert not p.apigw_stage
@@ -1530,12 +1845,14 @@ def testApigwPath():
     assert p.prefix == "/api"
 
     # resource "proxy+", no apigwg, path mapping (prefix), api prefix (api)
-    event = {
+    event_payload = {
+        "version": "1.0",
         "resource": "/api/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/prefix/api/test/1234/pix",
         "headers": {},
     }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert not p.apigw_stage
@@ -1544,13 +1861,15 @@ def testApigwPath():
     assert p.prefix == "/prefix/api"
 
     # resource "proxy+", apigwg (production), api prefix (api)
-    event = {
+    event_payload = {
+        "version": "1.0",
         "resource": "/api/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/prefix/api/test/1234/pix",
         "headers": {"host": "afakeapi.execute-api.us-east-1.amazonaws.com"},
         "requestContext": {"stage": "production"},
     }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert p.apigw_stage == "production"
@@ -1567,7 +1886,7 @@ def testApigwPath():
     # test -> https://ggnbmhlvlf.execute-api.us-east-1.amazonaws.com/test
     #
     # resource "proxy+", apigwg stage ($default), no path mapping, no api prefix
-    event = {
+    event_payload = {
         "version": "1.0",
         "resource": "/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
@@ -1575,6 +1894,7 @@ def testApigwPath():
         "headers": {"host": "afakeapi.execute-api.us-east-1.amazonaws.com"},
         "requestContext": {"stage": "$default"},
     }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert p.apigw_stage == "$default"
@@ -1583,7 +1903,7 @@ def testApigwPath():
     assert not p.prefix
 
     # resource "proxy+", apigwg stage (production), no path mapping, no api prefix
-    event = {
+    event_payload = {
         "version": "1.0",
         "resource": "/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
@@ -1591,6 +1911,7 @@ def testApigwPath():
         "headers": {"host": "afakeapi.execute-api.us-east-1.amazonaws.com"},
         "requestContext": {"stage": "production"},
     }
+    event = proxy.EventFactory.create_from_payload(event_payload)
     p = proxy.ApigwPath(event)
     assert p.path == "/test/1234/pix"
     assert p.apigw_stage == "production"
@@ -1607,6 +1928,7 @@ def testApigwHostUrl():
 
     # resource "/", no apigwg, noproxy, no path mapping
     event = {
+        "version": "1.0",
         "path": "/test/1234/pix",
         "headers": {"Host": "test.apigw.com"},
         "httpMethod": "GET",
@@ -1615,6 +1937,7 @@ def testApigwHostUrl():
     assert app.host == "https://test.apigw.com"
 
     event = {
+        "version": "1.0",
         "resource": "/",
         "path": "/test/1234/pix",
         "headers": {"Host": "test.apigw.com"},
@@ -1625,6 +1948,7 @@ def testApigwHostUrl():
 
     # resource "proxy+", apigwg (production), api prefix (api)
     event = {
+        "version": "1.0",
         "resource": "/api/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/api/test/1234/pix",
@@ -1657,6 +1981,7 @@ def testApigwHostUrl():
 
     # resource "proxy+", no apigwg, no path mapping, no api prefix
     event = {
+        "version": "1.0",
         "resource": "/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/test/1234/pix",
@@ -1668,6 +1993,7 @@ def testApigwHostUrl():
 
     # resource "proxy+", no apigwg, path mapping (prefix), api prefix (api)
     event = {
+        "version": "1.0",
         "resource": "/api/{proxy+}",
         "pathParameters": {"proxy": "test/1234/pix"},
         "path": "/prefix/api/test/1234/pix",
@@ -1681,6 +2007,7 @@ def testApigwHostUrl():
     # Local
     app.https = False
     event = {
+        "version": "1.0",
         "resource": "/",
         "path": "/api/test/1234/pix",
         "headers": {"Host": "127.0.0.0:8000"},
@@ -1706,6 +2033,7 @@ def test_API_simpleRoute():
         return ("OK", "text/plain", user)
 
     event = {
+        "version": "1.0",
         "path": "/remotepixel",
         "httpMethod": "GET",
         "headers": {},
@@ -1724,6 +2052,7 @@ def test_API_simpleRoute():
     assert res["body"] == "remotepixel"
 
     event = {
+        "version": "1.0",
         "path": "/test",
         "httpMethod": "POST",
         "headers": {},
@@ -1739,5 +2068,11 @@ def test_API_simpleRoute():
     assert res["body"] == "yo"
 
     # Clear logger handlers
+    for h in app.log.handlers:
+        app.log.removeHandler(h)
+
+
+def clear_logger_handlers(app: proxy.API):
+    """Clear logger handlers"""
     for h in app.log.handlers:
         app.log.removeHandler(h)
